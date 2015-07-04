@@ -1,3 +1,4 @@
+#include <EEPROM.h>
 #include <Wire.h>
 #include <SPI.h>
 #include <RTClib.h>
@@ -5,6 +6,7 @@
 
 #include <SimpleTimer.h>
 
+#include <Adafruit_NeoPixel.h>
 
 //
 // LED Morning Clock
@@ -12,8 +14,39 @@
 // Copyright Sid Price 2015 - All rights reserved
 //
 
+//
+// This is the table of pixels on in the display, it is
+// accessed by using the difference minutes
+//
+
+const unsigned char ledsOn[] = {
+  8,7,7,7,7,6,6,6,6,5,5,5,5,4,4,4,4,3,3,3,3,2,2,2,2,1,1,1,1,0,0,0
+} ;
+//
+// LED strip attached to the following pin
+//
+#define PIN 6
+//
+// Display colors
+//
+uint32_t colorFirstSegment ;
+uint32_t colorSecondSegment ;
+uint32_t colorThirdSegment ;
+
+uint8_t ucLedOnCount ;
+
+// Parameter 1 = number of pixels in strip
+// Parameter 2 = Arduino pin number (most are valid)
+// Parameter 3 = pixel type flags, add together as needed:
+//   NEO_KHZ800  800 KHz bitstream (most NeoPixel products w/WS2812 LEDs)
+//   NEO_KHZ400  400 KHz (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
+//   NEO_GRB     Pixels are wired for GRB bitstream (most NeoPixel products)
+//   NEO_RGB     Pixels are wired for RGB bitstream (v1 FLORA pixels, not v2)
+Adafruit_NeoPixel strip = Adafruit_NeoPixel(8, PIN, NEO_GRB + NEO_KHZ800);
+
 String inputString = "";         // a string to hold incoming data
 boolean stringComplete = false;  // whether the string is complete
+
 //
 // The RTC object
 //
@@ -24,12 +57,87 @@ RTC_DS3231 RTC ;
 //
 SimpleTimer timer ;
 int   iTimerID ;
+#define cTimerPeriod    5000  // Expressed in milliseconds
+int   iAlarmHour ;
+int   iAlarmMinute ;
+long lPostAlarmActive = 0 ;      // A counter that keps the full strip displayed for "x" ticks after alarm
+long lPostAlarmCount ;
+//
+// Post alarm hold time
+//
+#define cPostAlarmTime  10L      // Expressed in minutes
+
+//
+// Define the EEPROM address usage
+//
+
+typedef enum {
+  eeBright = 0,
+  eeAlarmHour,        // 0x01
+  eeAlarmMinute,
+} eepOffsets ;
 
 void setup() {
+  //
   // initialize serial:
+  //
   Serial.begin(57600);
+  //
   // reserve 200 bytes for the inputString:
+  //
   inputString.reserve(64);
+  //
+  // Calculate the numnber of timer ticks for the full display hold time
+  //
+  lPostAlarmCount = cPostAlarmTime * 60 ;
+  lPostAlarmCount *= 1000 ;
+  lPostAlarmCount /= cTimerPeriod ;
+  //
+  // Setup the LED strip
+  //
+  strip.begin();
+  strip.setBrightness(128) ;
+  strip.show(); // Initialize all pixels to 'off'
+  //
+  // Setup segment colors
+  //
+  colorFirstSegment = strip.Color(0,204,204) ;    // Dark green
+  colorSecondSegment = strip.Color(255,255,102) ; // Kinda Yellow
+  colorThirdSegment = strip.Color(255,128,0) ;  // Orange
+  //
+  // Get the brightness from the EEPROM
+  //
+  uint8_t bBrightness = EEPROM.read(eeBright) ;
+  //
+  if (bBrightness != 0)
+  {
+    strip.setBrightness(bBrightness) ;
+    Serial.print("Brightness reset to ") ;
+    Serial.println(bBrightness) ;
+  }
+  else
+  {
+    strip.setBrightness(16) ;   // Set a default (low)
+    Serial.println("Brightness set to default of 16") ;
+  }
+  //
+  // Get the Alarm from the EEPROM
+  //
+  iAlarmHour = EEPROM.read(eeAlarmHour) ;
+  iAlarmMinute = EEPROM.read(eeAlarmMinute) ;
+  if((iAlarmHour >= 0) && (iAlarmHour <= 23))
+  {
+    Serial.print("Alarm == ") ;
+    Serial.print(iAlarmHour,DEC) ;
+    Serial.print(":") ;
+    Serial.println(iAlarmMinute) ;
+  }
+  else
+  {
+    iAlarmHour = 0 ;
+    iAlarmMinute = 0 ;
+    Serial.println("Alarm not set!") ;
+  }
   //
   // Init the Wire and RTC hardware
   //
@@ -51,7 +159,8 @@ void setup() {
   // Setup the timer
   //
   iTimerID = timer.setInterval(5000,timerCallback) ;
-  Serial.println(iTimerID) ;
+  Serial.print("Alarm hold time is ") ;
+  Serial.println(lPostAlarmCount) ;
   Serial.println("Setup complete.");
 }
 
@@ -67,6 +176,12 @@ void setup() {
 //    b. GetTime - Reads the RTC and sends it to the console
 //    c. SetAlarm - Sets the Alarm time
 //    d. GetAlarm - Gets the Alarm time
+//    e. SetBright - Sets the display brightness
+//          0 == off
+//        255 == full intensity
+//    f. GetBright - Gets the current display intensity
+//    g. SetHold - Sets the alarm display hold time (expressed in minutes)
+//    h. GetHold - Gets the alarm display hold time (expressed in minutes)
 //  2. Reads the RTC
 //    a. Checks if the TOD is within 30 minutes of the Alarm and calls appropriate processing
 //
@@ -81,9 +196,20 @@ void loop() {
     int iError = -1 ;
     char  * lpszSyntax = "" ;
     //
-    if(inputString.startsWith("SetTime"))
+    inputString.toLowerCase() ;
+    if((inputString.startsWith("settime")) || (inputString.startsWith("setalarm")))
     {
-      lpszSyntax = "SetTime hh:mm" ;
+      boolean isAlarm = false ;
+      //
+      if(inputString.startsWith("setalarm"))
+      {
+        isAlarm = true ;
+        lpszSyntax = "SetAlarm hh:mm" ;
+      }
+      else
+      {
+        lpszSyntax = "SetTime hh:mm" ;
+      }
       //
       //  Process the aruments for this command
       //
@@ -122,17 +248,36 @@ void loop() {
           //
           if((iHours <= 23) && (iMinutes <= 59))
           {
-            setTime(iHours,iMinutes) ;
+            if(isAlarm == 0)
+            {
+              setTime(iHours,iMinutes) ;
+            }
+            else
+            {
+              setAlarm(iHours,iMinutes) ;
+            }
             iError = 0 ;    // No errors
           }
         }
       }
     }
-    else if (inputString.startsWith("GetTime"))
+    else if (inputString.startsWith("gettime"))
     {
       lpszSyntax = "GetTime" ;
       getTime() ;
       iError=0 ;
+    }
+    else if (inputString.startsWith("getalarm"))
+    {
+      lpszSyntax = "GetAlarm" ;
+      getAlarm() ;
+      iError = 0 ;
+    }
+    else if (inputString.startsWith("setbright"))
+    {
+      lpszSyntax = "SetBright xx" ;
+      setBright() ;
+      iError = 0 ;
     }
     else
     {
@@ -170,6 +315,43 @@ void getTime(void)
   Serial.println(szTimeBuffer) ;
 }
 
+void setAlarm(int iHours, int iMinutes)
+{
+  iAlarmHour = iHours ;
+  iAlarmMinute = iMinutes ;
+  //
+  // Save Alarm to EEPROM
+  //
+  EEPROM.update(eeAlarmHour,iAlarmHour) ;
+  EEPROM.update(eeAlarmMinute,iAlarmMinute) ;
+  Serial.print("Alarm set to ") ;
+  Serial.print(iAlarmHour) ;
+  Serial.print(":") ;
+  Serial.println(iAlarmMinute) ;
+}
+
+void getAlarm(void)
+{
+  Serial.print("Alarm == ") ;
+  Serial.print(iAlarmHour) ;
+  Serial.print(":") ;
+  Serial.println(iAlarmMinute) ;
+}
+
+void setBright(void)
+{
+  uint8_t iIndex = inputString.indexOf(" ") ;
+  String strBrightness = inputString.substring(iIndex) ;
+  uint8_t brightness = strBrightness.toInt() ;
+  //
+  // Update the EEPROM
+  //
+  EEPROM.update(eeBright,brightness) ;
+  strip.setBrightness(brightness) ;
+  strip.show();
+  Serial.print("Brightness is now ") ;
+  Serial.println(brightness) ;
+}
 //
 //  Periodic check for alarm trigger
 //
@@ -178,7 +360,109 @@ void getTime(void)
 
 void timerCallback(void)
 {
-  Serial.println("Timer called") ;
+  //
+  //  Read the curent date/time from the RTC
+  //
+  DateTime  now = RTC.now() ;
+  int       iNowHour = now.hour() ;
+  int       iNowMinute = now.minute() ;
+  int       iDiffHour ;
+  int       iDiffMinute ;
+  //
+  // Calculate the difference between the Alarm time and now
+  //
+  iDiffMinute = iAlarmMinute - iNowMinute ;
+  //
+  if(iDiffMinute < 0)
+  {
+    iDiffMinute = (60 - iNowMinute) + iAlarmMinute ;
+    iNowHour += 1 ;
+  }
+  iDiffHour = iAlarmHour - iNowHour ;
+  //
+  if(iDiffHour < 0)
+  {
+    iDiffHour = (24 - iNowHour) + iAlarmHour ;
+  }
+  //
+  // Difference must be less than one hour because we approach alarm
+  // in 4 minute intervals
+  //
+  if(iDiffHour == 0)
+  {
+    //
+    // Difference minutes must be 32 or less
+    //
+    if(iDiffMinute <= 32)
+    {
+      uint32_t pixelColor  ;
+      //
+      // Process the LEDs
+      //
+      ucLedOnCount = ledsOn[iDiffMinute] ;
+      //
+      // All off first
+      //
+      for(unsigned char ucIndex = 0 ; ucIndex < ucLedOnCount ; ucIndex++)
+      {
+          strip.setPixelColor(ucIndex,strip.Color(0, 0, 0)) ;
+      }
+      strip.show() ;
+      //
+      // Now the display
+      //
+      for(unsigned char ucIndex = 0 ; ucIndex < ucLedOnCount ; ucIndex++)
+      {
+        if(ucIndex < 4)
+        {
+          pixelColor = colorFirstSegment ;
+        }
+        else if(ucIndex < 6)
+        {
+          pixelColor = colorSecondSegment ;
+        }
+        else
+        {
+          pixelColor = colorThirdSegment ;
+        }
+        
+        strip.setPixelColor(ucIndex,pixelColor) ;
+      }
+      strip.show() ;
+      //
+      // If this is the alarm point start the post alarm timer
+      //
+      if(ucLedOnCount == 8)
+      {
+        lPostAlarmActive = lPostAlarmCount ;
+      }
+    }
+  }
+  //
+  // Is the post alarm timer active?
+  //
+  if(lPostAlarmActive != 0)
+  {
+    //
+    // End of the hold time?
+    //
+    if(lPostAlarmActive == 1)
+    {
+      lPostAlarmActive = 0 ;
+      //
+      // All pixels off
+      //
+      for(unsigned char ucIndex = 0 ; ucIndex < 8 ; ucIndex++)
+      {
+          strip.setPixelColor(ucIndex,strip.Color(0, 0, 0)) ;
+      }
+      strip.show() ;
+    }
+    else
+    {
+      lPostAlarmActive-- ;
+    }
+  }
 }
 
 ///////////////////////////////////////////////////////
