@@ -60,6 +60,9 @@ int   iTimerID ;
 #define cTimerPeriod    5000  // Expressed in milliseconds
 int   iAlarmHour ;
 int   iAlarmMinute ;
+
+uint8_t ui8Bright ;
+
 long lPostAlarmActive = 0 ;      // A counter that keps the full strip displayed for "x" ticks after alarm
 long lPostAlarmCount ;
 //
@@ -107,13 +110,13 @@ void setup() {
   //
   // Get the brightness from the EEPROM
   //
-  uint8_t bBrightness = EEPROM.read(eeBright) ;
+  ui8Bright = EEPROM.read(eeBright) ;
   //
-  if (bBrightness != 0)
+  if (ui8Bright != 0)
   {
-    strip.setBrightness(bBrightness) ;
+    strip.setBrightness(ui8Bright) ;
     Serial.print("Brightness reset to ") ;
-    Serial.println(bBrightness) ;
+    Serial.println(ui8Bright) ;
   }
   else
   {
@@ -279,6 +282,12 @@ void loop() {
       setBright() ;
       iError = 0 ;
     }
+    else if (inputString.startsWith("getbright"))
+    {
+      lpszSyntax = "GetBright" ;
+      getBright() ;
+      iError = 0 ;
+    }
     else
     {
       Serial.println("Don't know you!") ;
@@ -342,15 +351,21 @@ void setBright(void)
 {
   uint8_t iIndex = inputString.indexOf(" ") ;
   String strBrightness = inputString.substring(iIndex) ;
-  uint8_t brightness = strBrightness.toInt() ;
+  ui8Bright = strBrightness.toInt() ;
   //
   // Update the EEPROM
   //
-  EEPROM.update(eeBright,brightness) ;
-  strip.setBrightness(brightness) ;
+  EEPROM.update(eeBright,ui8Bright) ;
+  strip.setBrightness(ui8Bright) ;
   strip.show();
   Serial.print("Brightness is now ") ;
-  Serial.println(brightness) ;
+  Serial.println(ui8Bright) ;
+}
+
+void getBright(void)
+{
+  Serial.print("Brightness is  ") ;
+  Serial.println(ui8Bright) ;
 }
 //
 //  Periodic check for alarm trigger
