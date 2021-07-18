@@ -2,9 +2,8 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <RTClib.h>
-#include <RTC_DS3231.h>
 
-#include <SimpleTimer.h>
+#include "AsyncTimerLib.h"
 
 #include <Adafruit_NeoPixel.h>
 
@@ -50,14 +49,15 @@ boolean stringComplete = false;  // whether the string is complete
 //
 // The RTC object
 //
-RTC_DS3231 RTC ;
+RTC_DS3231 rtc ;
 //
-// Simple Timer object, used for
+// Timer object, used for
 // timing the comparison of time and alarm
 //
-SimpleTimer timer ;
-int   iTimerID ;
-#define cTimerPeriod    5000  // Expressed in milliseconds
+void timerCallback(void) ;
+#define cTimerPeriod    5000000  // Expressed in microseconds
+AsyncTimer theTimer(cTimerPeriod, true, timerCallback);
+
 int   iAlarmHour ;
 int   iAlarmMinute ;
 
@@ -94,7 +94,7 @@ void setup() {
   //
   lPostAlarmCount = cPostAlarmTime * 60 ;
   lPostAlarmCount *= 1000 ;
-  lPostAlarmCount /= cTimerPeriod ;
+  lPostAlarmCount /= (cTimerPeriod/1000) ;
   //
   // Setup the LED strip
   //
@@ -104,7 +104,7 @@ void setup() {
   //
   // Setup segment colors
   //
-  colorFirstSegment = strip.Color(0,204,204) ;    // Dark green
+  colorFirstSegment = strip.Color(255,255,255) ;
   colorSecondSegment = strip.Color(255,255,102) ; // Kinda Yellow
   colorThirdSegment = strip.Color(255,128,0) ;  // Orange
   //
@@ -115,6 +115,7 @@ void setup() {
   if (ui8Bright != 0)
   {
     strip.setBrightness(ui8Bright) ;
+    Serial.println("") ;
     Serial.print("Brightness reset to ") ;
     Serial.println(ui8Bright) ;
   }
@@ -130,7 +131,7 @@ void setup() {
   iAlarmMinute = EEPROM.read(eeAlarmMinute) ;
   if((iAlarmHour >= 0) && (iAlarmHour <= 23))
   {
-    Serial.print("Alarm == ") ;
+    Serial.print("Alarm time is ") ;
     Serial.print(iAlarmHour,DEC) ;
     Serial.print(":") ;
     Serial.println(iAlarmMinute) ;
@@ -145,23 +146,21 @@ void setup() {
   // Init the Wire and RTC hardware
   //
   Wire.begin() ;
-  RTC.begin() ;  
-  // Check if the RTC is running.
-  if (! RTC.isrunning()) {
-    Serial.println("RTC is NOT running");
-  }
+  rtc.begin() ;  
   //
-  DateTime now = RTC.now();
+  DateTime now = rtc.now();
+  theTimer.Start();
   //
   // Print the current time to the serial port
   //
-  char  szTimeBuffer[64] ;
-  now.toString(szTimeBuffer,64) ;
+  char  szTimeBuffer[64] = {0} ;
+  //
+  // Put time format into the buffer
+  //
+  strcpy(&szTimeBuffer[0], "Time is hh:mmap") ;
+  now.toString(szTimeBuffer) ;
   Serial.println(szTimeBuffer) ;
-  //
-  // Setup the timer
-  //
-  iTimerID = timer.setInterval(5000,timerCallback) ;
+
   Serial.print("Alarm hold time is ") ;
   Serial.println(lPostAlarmCount) ;
   Serial.println("Setup complete.");
@@ -190,7 +189,7 @@ void setup() {
 //
 
 void loop() {
-  timer.run() ;
+  theTimer.Update() ;
   //
   //  Process any strings that arrive on the serial line
   //
@@ -308,19 +307,19 @@ void loop() {
 
 void setTime(int iHours, int iMinutes)
 {
-  DateTime was = RTC.now() ;
+  DateTime was = rtc.now() ;
   DateTime now(was.year(),was.month(),was.day(),iHours,iMinutes, 0) ;
   //
-  RTC.adjust(now) ;
+  rtc.adjust(now) ;
   getTime() ;
   Serial.println("SetTime complete.");
 }
 
 void getTime(void)
 {
-  DateTime  now = RTC.now() ;
+  DateTime  now = rtc.now() ;
   char  szTimeBuffer[64] ;
-  now.toString(szTimeBuffer,64) ;
+  now.toString(szTimeBuffer) ;
   Serial.println(szTimeBuffer) ;
 }
 
@@ -375,10 +374,11 @@ void getBright(void)
 
 void timerCallback(void)
 {
+  Serial.println("Tick") ;
   //
   //  Read the curent date/time from the RTC
   //
-  DateTime  now = RTC.now() ;
+  DateTime  now = rtc.now() ;
   int       iNowHour = now.hour() ;
   int       iNowMinute = now.minute() ;
   int       iDiffHour ;
@@ -403,11 +403,13 @@ void timerCallback(void)
   // Difference must be less than one hour because we approach alarm
   // in 4 minute intervals
   //
+  iDiffHour = 0 ; // Force display to run
   if(iDiffHour == 0)
   {
     //
     // Difference minutes must be 32 or less
     //
+    iDiffMinute = 15 ;  // Force a display
     if(iDiffMinute <= 32)
     {
       uint32_t pixelColor  ;
@@ -510,4 +512,3 @@ void serialEvent() {
     } 
   }
 }
-
