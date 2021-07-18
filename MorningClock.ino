@@ -10,7 +10,7 @@
 //
 // LED Morning Clock
 //
-// Copyright Sid Price 2015 - All rights reserved
+// Copyright Sid Price 2021 - All rights reserved
 //
 
 //
@@ -99,7 +99,7 @@ void setup() {
   //
   // initialize serial:
   //
-  Serial.begin(57600);
+  Serial.begin(115200);
   //
   // reserve 200 bytes for the inputString:
   //
@@ -325,7 +325,10 @@ void getTime(void)
 {
   DateTime  now = rtc.now() ;
   char  szTimeBuffer[64] ;
+  strcpy(&szTimeBuffer[0], "Time is hh:mmap") ;
   now.toString(szTimeBuffer) ;
+  Serial.println(szTimeBuffer) ;
+
   Serial.println(szTimeBuffer) ;
 }
 
@@ -444,16 +447,15 @@ void timerCallback(void)
   // Difference must be less than one hour because we approach alarm
   // in 4 minute intervals
   //
-  iDiffHour = 0 ; // Force display to run
   if(iDiffHour == 0)
   {
     //
     // Difference minutes must be 32 or less
     //
-    iDiffMinute = 15 ;  // Force a display
     if(iDiffMinute <= 32)
     {
       uint32_t pixelColor  ;
+      uint8_t stripBrightness ;
       //
       // Process the LEDs
       //
@@ -474,14 +476,17 @@ void timerCallback(void)
         if(ucIndex < 4)
         {
           pixelColor = colorFirstSegment ;
+          stripBrightness = ui8Bright_1 ;
         }
         else if(ucIndex < 6)
         {
           pixelColor = colorSecondSegment ;
+          stripBrightness = ui8Bright_2 ;
         }
         else
         {
           pixelColor = colorThirdSegment ;
+          stripBrightness = ui8Bright_3 ;
         }
         
         strip.setPixelColor(ucIndex,pixelColor) ;
@@ -493,7 +498,9 @@ void timerCallback(void)
       if(ucLedOnCount == 8)
       {
         lPostAlarmActive = lPostAlarmCount ;
+        stripBrightness = ui8Bright_pa ;
       }
+      strip.setBrightness(stripBrightness) ;
     }
   }
   //
