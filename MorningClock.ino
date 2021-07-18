@@ -61,7 +61,10 @@ AsyncTimer theTimer(cTimerPeriod, true, timerCallback);
 int   iAlarmHour ;
 int   iAlarmMinute ;
 
-uint8_t ui8Bright ;
+uint8_t ui8Bright_1 ;
+uint8_t ui8Bright_2 ;
+uint8_t ui8Bright_3 ;
+uint8_t ui8Bright_pa ;
 
 long lPostAlarmActive = 0 ;      // A counter that keps the full strip displayed for "x" ticks after alarm
 long lPostAlarmCount ;
@@ -75,10 +78,22 @@ long lPostAlarmCount ;
 //
 
 typedef enum {
-  eeBright = 0,
-  eeAlarmHour,        // 0x01
+  eeBright_1 = 0,   // Segment 1 brightness
+  eeAlarmHour,      // 0x01
   eeAlarmMinute,
+  eeBright_2,       // Segment 2 brightness
+  eeBright_3,       // Segment 3 brightness
+  eeBright_pa, // Post-alarm brightness
 } eepOffsets ;
+
+//
+// Define the default brightness levels for the segments
+//
+
+#define bright_1 20
+#define bright_2 100
+#define bright_3 200
+#define bright_pa 255
 
 void setup() {
   //
@@ -105,25 +120,16 @@ void setup() {
   // Setup segment colors
   //
   colorFirstSegment = strip.Color(255,255,255) ;
-  colorSecondSegment = strip.Color(255,255,102) ; // Kinda Yellow
-  colorThirdSegment = strip.Color(255,128,0) ;  // Orange
+  colorSecondSegment = strip.Color(255,255,255) ;
+  colorThirdSegment = strip.Color(255,255,255) ;
   //
   // Get the brightness from the EEPROM
   //
-  ui8Bright = EEPROM.read(eeBright) ;
-  //
-  if (ui8Bright != 0)
-  {
-    strip.setBrightness(ui8Bright) ;
-    Serial.println("") ;
-    Serial.print("Brightness reset to ") ;
-    Serial.println(ui8Bright) ;
-  }
-  else
-  {
-    strip.setBrightness(16) ;   // Set a default (low)
-    Serial.println("Brightness set to default of 16") ;
-  }
+  ui8Bright_1 = EEPROM.read(eeBright_1) ;
+  ui8Bright_2 = EEPROM.read(eeBright_2) ;
+  ui8Bright_3 = EEPROM.read(eeBright_3) ;
+  ui8Bright_pa = EEPROM.read(eeBright_pa) ;
+  strip.setBrightness(0) ;  // LEDs off
   //
   // Get the Alarm from the EEPROM
   //
@@ -178,10 +184,10 @@ void setup() {
 //    b. GetTime - Reads the RTC and sends it to the console
 //    c. SetAlarm - Sets the Alarm time
 //    d. GetAlarm - Gets the Alarm time
-//    e. SetBright - Sets the display brightness
+//    e. SetBright - Sets the display brightness - setbright 1,2,3,pa
 //          0 == off
 //        255 == full intensity
-//    f. GetBright - Gets the current display intensity
+//    f. GetBright - Gets the current display intensities
 //    g. SetHold - Sets the alarm display hold time (expressed in minutes)
 //    h. GetHold - Gets the alarm display hold time (expressed in minutes)
 //  2. Reads the RTC
@@ -348,23 +354,59 @@ void getAlarm(void)
 
 void setBright(void)
 {
-  uint8_t iIndex = inputString.indexOf(" ") ;
-  String strBrightness = inputString.substring(iIndex) ;
-  ui8Bright = strBrightness.toInt() ;
+  uint8_t iIndex_1,iIndex_2, iIndex_3, iIndex_4 ;
+  String strValue ;
+  iIndex_1 = inputString.indexOf(" ") ;
+  iIndex_1++ ;  // Start of first parameter
+  iIndex_2 = inputString.indexOf(",") ; // First delimeter
+  strValue = inputString.substring(iIndex_1, iIndex_2) ;
+  ui8Bright_1 = strValue.toInt() ;
+  Serial.println(ui8Bright_1) ;
+  iIndex_1 = iIndex_2+1 ;
+  iIndex_2 = inputString.indexOf(",", iIndex_1) ;
+  if (iIndex_2 != -1)
+  {
+    strValue = inputString.substring(iIndex_1, iIndex_2) ;
+    ui8Bright_2 = strValue.toInt() ;
+    Serial.println(ui8Bright_2) ;
+    iIndex_1 = iIndex_2+1 ;
+    iIndex_2 = inputString.indexOf(",", iIndex_1) ;
+    if (iIndex_2 != -1)
+    {
+      strValue = inputString.substring(iIndex_1, iIndex_2) ;
+      ui8Bright_3 = strValue.toInt() ;
+      Serial.println(ui8Bright_3) ;
+      iIndex_1 = iIndex_2+1 ;
+      iIndex_2 = inputString.indexOf(",", iIndex_1) ;
+      if (iIndex_2 != -1)
+      {
+        strValue = inputString.substring(iIndex_1, iIndex_2) ;
+        ui8Bright_pa = strValue.toInt() ;
+        Serial.println(ui8Bright_pa) ;
+      }
+    }
+  }
   //
   // Update the EEPROM
   //
-  EEPROM.update(eeBright,ui8Bright) ;
-  strip.setBrightness(ui8Bright) ;
+  EEPROM.update(eeBright_1,ui8Bright_1) ;
+  EEPROM.update(eeBright_2,ui8Bright_2) ;
+  EEPROM.update(eeBright_3,ui8Bright_3) ;
+  EEPROM.update(eeBright_pa,ui8Bright_pa) ;
+  strip.setBrightness(ui8Bright_1) ;
   strip.show();
-  Serial.print("Brightness is now ") ;
-  Serial.println(ui8Bright) ;
 }
 
 void getBright(void)
 {
-  Serial.print("Brightness is  ") ;
-  Serial.println(ui8Bright) ;
+  Serial.print("Brightness segment 1 is  ") ;
+  Serial.println(ui8Bright_1) ;
+  Serial.print("Brightness segment 2 is  ") ;
+  Serial.println(ui8Bright_2) ;
+  Serial.print("Brightness segment 3 is  ") ;
+  Serial.println(ui8Bright_3) ;
+  Serial.print("Brightness post alarm is  ") ;
+  Serial.println(ui8Bright_pa) ;
 }
 //
 //  Periodic check for alarm trigger
@@ -374,7 +416,6 @@ void getBright(void)
 
 void timerCallback(void)
 {
-  Serial.println("Tick") ;
   //
   //  Read the curent date/time from the RTC
   //
