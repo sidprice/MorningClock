@@ -491,6 +491,7 @@ void timerCallback(void)
         
         strip.setPixelColor(ucIndex,pixelColor) ;
       }
+      strip.setBrightness(stripBrightness) ;
       strip.show() ;
       //
       // If this is the alarm point start the post alarm timer
@@ -521,6 +522,7 @@ void timerCallback(void)
       {
           strip.setPixelColor(ucIndex,strip.Color(0, 0, 0)) ;
       }
+      strip.setBrightness(0) ;
       strip.show() ;
     }
     else
